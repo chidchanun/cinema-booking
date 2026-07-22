@@ -1,0 +1,27 @@
+name: Public deployment smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: Public application URL, for example https://cinema.example.com
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check frontend, API proxy, readiness, and metrics
+        env:
+          BASE_URL: ${{ inputs.base_url }}
+        run: |
+          set -euo pipefail
+          base_url="${BASE_URL%/}"
+          curl --fail --silent --show-error --retry 5 --retry-all-errors "$base_url/" >/dev/null
+          curl --fail --silent --show-error --retry 5 --retry-all-errors "$base_url/api/v1/movies?page=1&limit=1" >/dev/null
+          curl --fail --silent --show-error --retry 5 --retry-all-errors "$base_url/health/ready" >/dev/null
+          curl --fail --silent --show-error --retry 5 --retry-all-errors "$base_url/metrics" >/dev/null

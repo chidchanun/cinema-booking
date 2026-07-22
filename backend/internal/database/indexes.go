@@ -203,6 +203,15 @@ func createBookingIndexes(
 		},
 		{
 			Keys: bson.D{
+				{Key: "user_id", Value: 1},
+				{Key: "movie_id", Value: 1},
+				{Key: "showtime_start", Value: 1},
+				{Key: "created_at", Value: -1},
+			},
+			Options: options.Index().SetName("idx_bookings_user_movie_showtime"),
+		},
+		{
+			Keys: bson.D{
 				{Key: "showtime_id", Value: 1},
 				{Key: "seat_code", Value: 1},
 			},

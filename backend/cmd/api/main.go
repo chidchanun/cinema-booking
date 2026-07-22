@@ -18,6 +18,7 @@ import (
 	"cinema-booking/internal/messaging"
 	authmiddleware "cinema-booking/internal/middleware"
 	"cinema-booking/internal/notification"
+	"cinema-booking/internal/observability"
 	"cinema-booking/internal/realtime"
 	"cinema-booking/internal/redislock"
 	"cinema-booking/internal/repository"
@@ -184,6 +185,7 @@ func main() {
 	go realtimeHub.Run(appCtx)
 
 	router.Use(
+		observability.Middleware(),
 		authmiddleware.RequestID(),
 		authmiddleware.RequestLogger(logger),
 		gin.Recovery(),
@@ -593,6 +595,7 @@ func main() {
 	// Keep /health as a backwards-compatible readiness endpoint.
 	router.GET("/health", readinessHandler)
 	router.GET("/health/ready", readinessHandler)
+	router.GET("/metrics", observability.Handler)
 
 	// HTTP Server
 	server := &http.Server{

@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { CalendarDays, Clock3, LoaderCircle, Ticket } from '@lucide/vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { CalendarDays, ChevronLeft, ChevronRight, Clock3, LoaderCircle, Ticket } from '@lucide/vue'
 
 import SiteHeader from '@/components/SiteHeader.vue'
 import { ApiError } from '@/services/api'
@@ -18,20 +18,23 @@ const pendingReservations = ref<PendingReservation[]>([])
 const movieTitles = ref<Record<string, string>>({})
 const movieFilter = ref('')
 const dateFilter = ref('')
+const page = ref(1)
+const total = ref(0)
+const totalPages = ref(1)
+const pageSize = 10
 
 const visibleBookings = computed(() => {
   const now = Date.now()
   return bookings.value.filter((booking) => {
     const isHistory = booking.status === 'CANCELLED' || new Date(booking.showtime_start).getTime() < now
     if (isHistory) return false
-    if (movieFilter.value && booking.movie_id !== movieFilter.value) return false
-    return !dateFilter.value || localDate(booking.showtime_start) === dateFilter.value
+    return !isHistory
   })
 })
 const movieOptions = computed(() => {
   const options = new Map<string, string>()
-  for (const booking of bookings.value) {
-    options.set(booking.movie_id, movieTitles.value[booking.movie_id] ?? booking.movie_id)
+  for (const [id, title] of Object.entries(movieTitles.value)) {
+    options.set(id, title)
   }
   for (const reservation of pendingReservations.value) {
     if (reservation.movie_id) options.set(reservation.movie_id, reservation.movie_title)
@@ -65,6 +68,14 @@ function clearFilters(): void {
   dateFilter.value = ''
 }
 
+function bookingDateFilters(): { from: string; to?: string } {
+  if (!dateFilter.value) return { from: new Date().toISOString() }
+  return {
+    from: new Date(`${dateFilter.value}T00:00:00`).toISOString(),
+    to: new Date(`${dateFilter.value}T23:59:59.999`).toISOString(),
+  }
+}
+
 function formatDate(value: string): string {
   const dateTime = new Intl.DateTimeFormat('th-TH', {
     dateStyle: 'medium',
@@ -86,10 +97,17 @@ async function loadBookings(): Promise<void> {
   try {
     pendingReservations.value = listPendingReservations()
     const [bookingResponse, movieResponse] = await Promise.all([
-      listMyBookings(),
+      listMyBookings({
+        page: page.value,
+        limit: pageSize,
+        movieID: movieFilter.value,
+        ...bookingDateFilters(),
+      }),
       listMovies('', undefined, 100),
     ])
     bookings.value = bookingResponse.data
+    total.value = bookingResponse.total
+    totalPages.value = Math.max(bookingResponse.total_pages, 1)
     movieTitles.value = Object.fromEntries(
       movieResponse.data.map((movie) => [movie.id, movie.title]),
     )
@@ -101,6 +119,16 @@ async function loadBookings(): Promise<void> {
 }
 
 onMounted(loadBookings)
+watch([movieFilter, dateFilter], () => {
+  page.value = 1
+  void loadBookings()
+})
+
+async function changePage(nextPage: number): Promise<void> {
+  if (nextPage < 1 || nextPage > totalPages.value || nextPage === page.value) return
+  page.value = nextPage
+  await loadBookings()
+}
 </script>
 
 <template>
@@ -158,6 +186,10 @@ onMounted(loadBookings)
           <div><span>ยอดชำระ</span><strong>{{ formatPrice(booking) }}</strong></div>
         </article>
       </div>
+      <nav v-if="total > 0" class="pagination" aria-label="หน้ารายการตั๋ว">
+        <span>ทั้งหมด {{ total }} ใบ</span>
+        <div><button type="button" title="หน้าก่อนหน้า" :disabled="page <= 1" @click="changePage(page - 1)"><ChevronLeft :size="17" /></button><strong>หน้า {{ page }} / {{ totalPages }}</strong><button type="button" title="หน้าถัดไป" :disabled="page >= totalPages" @click="changePage(page + 1)"><ChevronRight :size="17" /></button></div>
+      </nav>
     </section>
   </main>
 </template>
@@ -184,6 +216,11 @@ onMounted(loadBookings)
 .pending-row strong { overflow-wrap: anywhere; font-size: 15px; }
 .pay-link { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; padding: 0 17px; color: #fff; background: #8b681f; border-radius: 4px; font-weight: 750; text-decoration: none; white-space: nowrap; }
 .booking-list { display: grid; gap: 10px; margin-top: 24px; }
+.pagination { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 16px; margin-top: 12px; padding: 8px 12px; color: #716b64; font-size: 13px; background: #eeece8; border: 1px solid #d6d1ca; }
+.pagination > div { display: flex; align-items: center; gap: 10px; }
+.pagination strong { min-width: 88px; color: #3b3733; text-align: center; }
+.pagination button { display: grid; width: 34px; height: 34px; place-items: center; color: #393530; background: #fff; border: 1px solid #c8c2ba; border-radius: 3px; cursor: pointer; }
+.pagination button:disabled { color: #aaa39b; background: #e5e2dd; cursor: not-allowed; }
 .booking-row { display: grid; grid-template-columns: 1.25fr 1.1fr .55fr .65fr 1.35fr .7fr; gap: 16px; align-items: center; padding: 20px; background: #fff; border: 1px solid #d8d3cc; border-left: 4px solid #b48a36; border-radius: 4px; }
 .booking-row > div { display: grid; gap: 5px; min-width: 0; }
 .booking-row span { display: flex; align-items: center; gap: 5px; color: #7a746d; font-size: 13px; }

@@ -231,10 +231,11 @@ func (r *ShowtimeRepository) ListHalls(ctx context.Context) ([]models.HallSummar
 		if hall.Name == "" {
 			continue
 		}
-		if _, exists := seen[hall.Name]; exists {
+		key := strings.ToLower(hall.Name)
+		if _, exists := seen[key]; exists {
 			continue
 		}
-		seen[hall.Name] = struct{}{}
+		seen[key] = struct{}{}
 		halls = append(halls, hall)
 	}
 	if err := cursor.Err(); err != nil {

@@ -37,6 +37,7 @@ type BookingStore interface {
 	FindByUserID(
 		ctx context.Context,
 		userID primitive.ObjectID,
+		filter repository.UserBookingFilter,
 		skip int64,
 		limit int64,
 	) ([]models.Booking, int64, error)
@@ -188,6 +189,12 @@ type BookingListResult struct {
 	Limit      int
 	Total      int64
 	TotalPages int
+}
+
+type MyBookingFilter struct {
+	MovieID *primitive.ObjectID
+	From    *time.Time
+	To      *time.Time
 }
 
 func NewBookingService(
@@ -414,6 +421,7 @@ func (s *BookingService) GetMyBooking(
 func (s *BookingService) ListMyBookings(
 	ctx context.Context,
 	userID primitive.ObjectID,
+	filter MyBookingFilter,
 	page int,
 	limit int,
 ) (*BookingListResult, error) {
@@ -438,6 +446,11 @@ func (s *BookingService) ListMyBookings(
 	bookings, total, err := s.bookingRepository.FindByUserID(
 		ctx,
 		userID,
+		repository.UserBookingFilter{
+			MovieID: filter.MovieID,
+			From:    filter.From,
+			To:      filter.To,
+		},
 		skip,
 		int64(limit),
 	)

@@ -103,6 +103,16 @@ func (s *ShowtimeService) CheckHallAvailability(
 	if !movie.IsActive {
 		return nil, ErrMovieUnavailable
 	}
+	halls, err := s.showtimeRepository.ListHalls(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read hall layout: %w", err)
+	}
+	for _, hall := range halls {
+		if strings.EqualFold(hall.Name, hallName) {
+			hallName = hall.Name
+			break
+		}
+	}
 
 	endTime := startTime.UTC().Add(time.Duration(movie.DurationMinutes+15) * time.Minute)
 	conflict, err := s.showtimeRepository.HasHallConflict(ctx, hallName, startTime, endTime)
@@ -162,7 +172,7 @@ func (s *ShowtimeService) CreateShowtime(
 		return nil, fmt.Errorf("read hall layout: %w", err)
 	}
 	for _, hall := range halls {
-		if hall.Name == input.HallName &&
+		if strings.EqualFold(hall.Name, input.HallName) &&
 			(hall.SeatRows != input.SeatRows || hall.SeatsPerRow != input.SeatsPerRow) {
 			return nil, fmt.Errorf(
 				"%w: existing hall layout is %d rows by %d seats",
@@ -170,6 +180,9 @@ func (s *ShowtimeService) CreateShowtime(
 				hall.SeatRows,
 				hall.SeatsPerRow,
 			)
+		}
+		if strings.EqualFold(hall.Name, input.HallName) {
+			input.HallName = hall.Name
 		}
 	}
 

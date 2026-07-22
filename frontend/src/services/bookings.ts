@@ -23,6 +23,21 @@ export interface BookingListResponse {
   total_pages: number
 }
 
-export function listMyBookings(): Promise<BookingListResponse> {
-  return apiRequest<BookingListResponse>('/bookings?page=1&limit=100')
+export interface MyBookingFilters {
+  page?: number
+  limit?: number
+  movieID?: string
+  from?: string
+  to?: string
+}
+
+export function listMyBookings(filters: MyBookingFilters = {}): Promise<BookingListResponse> {
+  const query = new URLSearchParams({
+    page: String(filters.page ?? 1),
+    limit: String(filters.limit ?? 10),
+  })
+  if (filters.movieID) query.set('movie_id', filters.movieID)
+  if (filters.from) query.set('from', filters.from)
+  if (filters.to) query.set('to', filters.to)
+  return apiRequest<BookingListResponse>(`/bookings?${query.toString()}`)
 }

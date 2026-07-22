@@ -163,6 +163,18 @@ GOOGLE_CLIENT_ID=<google-oauth-client-id>
 
 Do not commit real `.env` files. Use HTTPS, `COOKIE_SECURE=true`, and an appropriate SameSite/CSRF policy in production.
 
+For a public deployment, set these values in the root `.env` before recreating
+the API container:
+
+```env
+CORS_ALLOWED_ORIGINS=https://cinema.example.com
+COOKIE_SECURE=true
+COOKIE_SAME_SITE=lax
+```
+
+Use a comma-separated origin list only when the deployment must also accept a
+local browser, such as `http://localhost:5173,https://cinema.example.com`.
+
 Create local environment files from the committed templates, then replace all
 placeholder values:
 
@@ -228,6 +240,10 @@ Health endpoints:
 - `http://localhost:9000/health/live` checks that the API process is serving requests.
 - `http://localhost:9000/health/ready` checks MongoDB, Redis, and RabbitMQ.
 - `http://localhost:9000/health` remains an alias for the readiness check.
+- `http://localhost:9000/metrics` exposes HTTP and WebSocket operational counters.
+
+The frontend proxy also exposes `/health/*` and `/metrics`, allowing the same
+checks through the public application hostname.
 
 After Google login, send the returned `csrf_token` value in the
 `X-CSRF-Token` header for authenticated `POST`, `PATCH`, and `DELETE`
@@ -310,6 +326,10 @@ token automatically. **Lock Seat** stores `lock_id` for the confirm or release
 request. Postman keeps the authentication cookie in its cookie jar.
 
 ### Testing scenarios
+
+After deploying, run the **Public deployment smoke test** workflow manually and
+provide the public base URL. It checks the frontend, API proxy, readiness, and
+metrics endpoints.
 
 #### Concurrent seat lock
 

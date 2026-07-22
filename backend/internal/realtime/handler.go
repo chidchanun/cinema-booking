@@ -3,11 +3,13 @@ package realtime
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"cinema-booking/internal/models"
+	"cinema-booking/internal/observability"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -105,6 +107,14 @@ func NewHandler(
 			}
 
 			_, allowed := originSet[origin]
+			if !allowed {
+				slog.Warn(
+					"WebSocket origin rejected",
+					"origin", origin,
+					"host", request.Host,
+					"path", request.URL.Path,
+				)
+			}
 
 			return allowed
 		},
@@ -124,12 +134,14 @@ func (h *Handler) Connect(
 		),
 	)
 	if err != nil {
+		observability.RecordWebSocketRejection()
 		c.JSON(http.StatusBadRequest, gin.H{
 			"error":   "invalid_showtime_id",
 			"message": "Showtime ID is invalid",
 		})
 		return
 	}
+	observability.RecordWebSocketUpgrade()
 
 	/*
 		ตรวจสอบก่อน Upgrade
@@ -155,6 +167,13 @@ func (h *Handler) Connect(
 		nil,
 	)
 	if err != nil {
+		slog.Warn(
+			"WebSocket upgrade failed",
+			"origin", c.Request.Header.Get("Origin"),
+			"host", c.Request.Host,
+			"path", c.Request.URL.Path,
+			"error", err,
+		)
 		return
 	}
 

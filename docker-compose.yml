@@ -195,7 +195,9 @@ services:
         required: false
     environment:
       APP_PORT: "9000"
-      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-lax}
       MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD_URI}@mongodb:27017/?authSource=admin&replicaSet=rs0&directConnection=true
       MONGO_DATABASE: ${MONGO_DATABASE:-cinema_booking}
       REDIS_ADDR: redis:6379

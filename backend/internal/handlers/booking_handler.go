@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	authmiddleware "cinema-booking/internal/middleware"
 	"cinema-booking/internal/models"
@@ -35,6 +36,7 @@ type BookingService interface {
 	ListMyBookings(
 		ctx context.Context,
 		userID primitive.ObjectID,
+		filter services.MyBookingFilter,
 		page int,
 		limit int,
 	) (*services.BookingListResult, error)
@@ -191,9 +193,40 @@ func (h *BookingHandler) ListMine(
 		10,
 	)
 
+	filter := services.MyBookingFilter{}
+	if rawMovieID := strings.TrimSpace(c.Query("movie_id")); rawMovieID != "" {
+		movieID, err := primitive.ObjectIDFromHex(rawMovieID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_movie_id", "message": "Movie ID is invalid"})
+			return
+		}
+		filter.MovieID = &movieID
+	}
+	for queryName, destination := range map[string]**time.Time{
+		"from": &filter.From,
+		"to":   &filter.To,
+	} {
+		rawValue := strings.TrimSpace(c.Query(queryName))
+		if rawValue == "" {
+			continue
+		}
+		parsed, err := time.Parse(time.RFC3339, rawValue)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_date_filter", "message": queryName + " must use RFC3339 format"})
+			return
+		}
+		parsed = parsed.UTC()
+		*destination = &parsed
+	}
+	if filter.From != nil && filter.To != nil && !filter.To.After(*filter.From) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid_date_filter", "message": "to must be after from"})
+		return
+	}
+
 	result, err := h.bookingService.ListMyBookings(
 		c.Request.Context(),
 		userID,
+		filter,
 		page,
 		limit,
 	)

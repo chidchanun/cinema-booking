@@ -235,9 +235,16 @@ func (r *BookingRepository) FindByIDAndUserID(
 	return &booking, nil
 }
 
+type UserBookingFilter struct {
+	MovieID *primitive.ObjectID
+	From    *time.Time
+	To      *time.Time
+}
+
 func (r *BookingRepository) FindByUserID(
 	ctx context.Context,
 	userID primitive.ObjectID,
+	filter UserBookingFilter,
 	skip int64,
 	limit int64,
 ) ([]models.Booking, int64, error) {
@@ -245,13 +252,26 @@ func (r *BookingRepository) FindByUserID(
 		return nil, 0, ErrInvalidUserID
 	}
 
-	filter := bson.M{
+	query := bson.M{
 		"user_id": userID,
+	}
+	if filter.MovieID != nil {
+		query["movie_id"] = *filter.MovieID
+	}
+	if filter.From != nil || filter.To != nil {
+		showtimeFilter := bson.M{}
+		if filter.From != nil {
+			showtimeFilter["$gte"] = filter.From.UTC()
+		}
+		if filter.To != nil {
+			showtimeFilter["$lt"] = filter.To.UTC()
+		}
+		query["showtime_start"] = showtimeFilter
 	}
 
 	total, err := r.bookingCollection.CountDocuments(
 		ctx,
-		filter,
+		query,
 	)
 	if err != nil {
 		return nil, 0, fmt.Errorf(
@@ -262,7 +282,7 @@ func (r *BookingRepository) FindByUserID(
 
 	cursor, err := r.bookingCollection.Find(
 		ctx,
-		filter,
+		query,
 		options.Find().
 			SetSort(bson.D{
 				{Key: "created_at", Value: -1},

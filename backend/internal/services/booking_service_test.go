@@ -55,6 +55,7 @@ func (s *atomicBookingStore) FindByIDAndUserID(
 func (s *atomicBookingStore) FindByUserID(
 	ctx context.Context,
 	userID primitive.ObjectID,
+	filter repository.UserBookingFilter,
 	skip int64,
 	limit int64,
 ) ([]models.Booking, int64, error) {
