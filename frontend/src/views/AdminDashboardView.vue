@@ -4,6 +4,8 @@ import {
   Activity,
   CalendarCheck,
   CalendarPlus,
+  ChevronLeft,
+  ChevronRight,
   Film,
   LoaderCircle,
   Pencil,
@@ -48,6 +50,16 @@ const bookingFrom = ref('')
 const bookingTo = ref('')
 const bookingFilterUsers = ref<AdminBooking['user'][]>([])
 const auditAction = ref('')
+const pageSize = 10
+const moviePage = ref(1)
+const movieTotal = ref(0)
+const movieTotalPages = ref(1)
+const bookingPage = ref(1)
+const bookingTotal = ref(0)
+const bookingTotalPages = ref(1)
+const auditPage = ref(1)
+const auditTotal = ref(0)
+const auditTotalPages = ref(1)
 const showMovieForm = ref(false)
 const editingMovieID = ref<string | null>(null)
 const tmdbQuery = ref('')
@@ -88,6 +100,8 @@ function currentBookingFilters() {
     userID: bookingUserID.value,
     from: bookingDateBoundary(bookingFrom.value),
     to: bookingDateBoundary(bookingTo.value, true),
+    page: bookingPage.value,
+    limit: pageSize,
   }
 }
 
@@ -100,16 +114,22 @@ async function loadDashboard(): Promise<void> {
   errorMessage.value = ''
   try {
     const [movieResponse, bookingResponse, auditResponse] = await Promise.all([
-      listAdminMovies(search.value),
-      listAdminBookings(),
-      listAuditLogs(),
+      listAdminMovies(search.value, moviePage.value, pageSize),
+      listAdminBookings({ page: bookingPage.value, limit: pageSize }),
+      listAuditLogs('', auditPage.value, pageSize),
     ])
     movies.value = movieResponse.data
+    movieTotal.value = movieResponse.total
+    movieTotalPages.value = Math.max(movieResponse.total_pages, 1)
     bookings.value = bookingResponse.data
+    bookingTotal.value = bookingResponse.total
+    bookingTotalPages.value = Math.max(bookingResponse.total_pages, 1)
     bookingFilterUsers.value = Array.from(
       new Map(bookingResponse.data.map((booking) => [booking.user.id, booking.user])).values(),
     )
     auditLogs.value = auditResponse.data
+    auditTotal.value = auditResponse.total
+    auditTotalPages.value = Math.max(auditResponse.total_pages, 1)
   } catch (error) {
     errorMessage.value = errorText(error, 'ไม่สามารถโหลดข้อมูลผู้ดูแลระบบได้')
   } finally {
@@ -120,7 +140,10 @@ async function loadDashboard(): Promise<void> {
 async function loadMovies(): Promise<void> {
   errorMessage.value = ''
   try {
-    movies.value = (await listAdminMovies(search.value)).data
+    const response = await listAdminMovies(search.value, moviePage.value, pageSize)
+    movies.value = response.data
+    movieTotal.value = response.total
+    movieTotalPages.value = Math.max(response.total_pages, 1)
   } catch (error) {
     errorMessage.value = errorText(error, 'ไม่สามารถโหลดรายการภาพยนตร์ได้')
   }
@@ -129,7 +152,10 @@ async function loadMovies(): Promise<void> {
 async function loadBookings(): Promise<void> {
   errorMessage.value = ''
   try {
-    bookings.value = (await listAdminBookings(currentBookingFilters())).data
+    const response = await listAdminBookings(currentBookingFilters())
+    bookings.value = response.data
+    bookingTotal.value = response.total
+    bookingTotalPages.value = Math.max(response.total_pages, 1)
   } catch (error) {
     errorMessage.value = errorText(error, 'ไม่สามารถโหลดรายการจองได้')
   }
@@ -138,10 +164,46 @@ async function loadBookings(): Promise<void> {
 async function loadAuditLogs(): Promise<void> {
   errorMessage.value = ''
   try {
-    auditLogs.value = (await listAuditLogs(auditAction.value)).data
+    const response = await listAuditLogs(auditAction.value, auditPage.value, pageSize)
+    auditLogs.value = response.data
+    auditTotal.value = response.total
+    auditTotalPages.value = Math.max(response.total_pages, 1)
   } catch (error) {
     errorMessage.value = errorText(error, 'ไม่สามารถโหลด Audit Logs ได้')
   }
+}
+
+async function searchMovies(): Promise<void> {
+  moviePage.value = 1
+  await loadMovies()
+}
+
+async function applyBookingFilters(): Promise<void> {
+  bookingPage.value = 1
+  await loadBookings()
+}
+
+async function applyAuditFilter(): Promise<void> {
+  auditPage.value = 1
+  await loadAuditLogs()
+}
+
+async function changeMoviePage(page: number): Promise<void> {
+  if (page < 1 || page > movieTotalPages.value || page === moviePage.value) return
+  moviePage.value = page
+  await loadMovies()
+}
+
+async function changeBookingPage(page: number): Promise<void> {
+  if (page < 1 || page > bookingTotalPages.value || page === bookingPage.value) return
+  bookingPage.value = page
+  await loadBookings()
+}
+
+async function changeAuditPage(page: number): Promise<void> {
+  if (page < 1 || page > auditTotalPages.value || page === auditPage.value) return
+  auditPage.value = page
+  await loadAuditLogs()
 }
 
 function clearBookingFilters(): void {
@@ -150,6 +212,7 @@ function clearBookingFilters(): void {
   bookingUserID.value = ''
   bookingFrom.value = ''
   bookingTo.value = ''
+  bookingPage.value = 1
   void loadBookings()
 }
 
@@ -318,9 +381,9 @@ onBeforeUnmount(() => {
       </header>
 
       <section class="metrics" aria-label="ข้อมูลสรุป">
-        <div><Film :size="20" /><span>ภาพยนตร์ที่เปิดแสดง</span><strong>{{ activeMovies }}</strong></div>
-        <div><CalendarCheck :size="20" /><span>การจองที่ยืนยัน</span><strong>{{ confirmedBookings }}</strong></div>
-        <div><Activity :size="20" /><span>ยอดจองรวม</span><strong>{{ formatMoney(revenue) }}</strong></div>
+        <div><Film :size="20" /><span>ภาพยนตร์ที่เปิดแสดงในหน้านี้</span><strong>{{ activeMovies }}</strong></div>
+        <div><CalendarCheck :size="20" /><span>การจองที่ยืนยันในหน้านี้</span><strong>{{ confirmedBookings }}</strong></div>
+        <div><Activity :size="20" /><span>ยอดจองในหน้านี้</span><strong>{{ formatMoney(revenue) }}</strong></div>
       </section>
 
       <nav class="admin-tabs" aria-label="เมนูจัดการ">
@@ -333,7 +396,7 @@ onBeforeUnmount(() => {
       <div v-if="loading" class="loading-state"><LoaderCircle class="spinner" :size="28" /> กำลังโหลดข้อมูล</div>
 
       <section v-else-if="activeTab === 'movies'" class="admin-content">
-        <form class="toolbar" role="search" @submit.prevent="loadMovies">
+        <form class="toolbar" role="search" @submit.prevent="searchMovies">
           <Search :size="18" />
           <input v-model="search" type="search" placeholder="ค้นหาภาพยนตร์" aria-label="ค้นหาภาพยนตร์" />
           <button type="submit">ค้นหา</button>
@@ -353,10 +416,11 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
+        <nav class="pagination" aria-label="หน้ารายการภาพยนตร์"><span>ทั้งหมด {{ movieTotal }} รายการ</span><div><button type="button" title="หน้าก่อนหน้า" :disabled="moviePage <= 1" @click="changeMoviePage(moviePage - 1)"><ChevronLeft :size="17" /></button><strong>หน้า {{ moviePage }} / {{ movieTotalPages }}</strong><button type="button" title="หน้าถัดไป" :disabled="moviePage >= movieTotalPages" @click="changeMoviePage(moviePage + 1)"><ChevronRight :size="17" /></button></div></nav>
       </section>
 
       <section v-else-if="activeTab === 'bookings'" class="admin-content">
-        <form class="toolbar booking-filter" @submit.prevent="loadBookings">
+        <form class="toolbar booking-filter" @submit.prevent="applyBookingFilters">
           <label>สถานะ<select v-model="bookingStatus"><option value="">ทั้งหมด</option><option value="BOOKED">ชำระแล้ว</option><option value="CANCELLED">ยกเลิก</option></select></label>
           <label>ภาพยนตร์<select v-model="bookingMovieID"><option value="">ทุกเรื่อง</option><option v-for="movie in movies" :key="movie.id" :value="movie.id">{{ movie.title }}</option></select></label>
           <label>ผู้ใช้<select v-model="bookingUserID"><option value="">ทุกคน</option><option v-for="user in bookingFilterUsers" :key="user.id" :value="user.id">{{ user.name }} · {{ user.email }}</option></select></label>
@@ -374,11 +438,12 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
+        <nav class="pagination" aria-label="หน้ารายการจอง"><span>ทั้งหมด {{ bookingTotal }} รายการ</span><div><button type="button" title="หน้าก่อนหน้า" :disabled="bookingPage <= 1" @click="changeBookingPage(bookingPage - 1)"><ChevronLeft :size="17" /></button><strong>หน้า {{ bookingPage }} / {{ bookingTotalPages }}</strong><button type="button" title="หน้าถัดไป" :disabled="bookingPage >= bookingTotalPages" @click="changeBookingPage(bookingPage + 1)"><ChevronRight :size="17" /></button></div></nav>
       </section>
 
       <section v-else class="admin-content">
         <div class="toolbar audit-filter">
-          <label>เหตุการณ์<select v-model="auditAction" @change="loadAuditLogs"><option value="">ทั้งหมด</option><option value="BOOKING_CONFIRMED">Booking Success</option><option value="BOOKING_TIMEOUT">Booking Timeout</option><option value="SEAT_RELEASED">Seat Released</option><option value="SYSTEM_ERROR">System Error</option></select></label>
+          <label>เหตุการณ์<select v-model="auditAction" @change="applyAuditFilter"><option value="">ทั้งหมด</option><option value="BOOKING_CONFIRMED">Booking Success</option><option value="BOOKING_TIMEOUT">Booking Timeout</option><option value="SEAT_RELEASED">Seat Released</option><option value="SYSTEM_ERROR">System Error</option></select></label>
         </div>
         <div class="table-wrap">
           <table>
@@ -389,6 +454,7 @@ onBeforeUnmount(() => {
             </tbody>
           </table>
         </div>
+        <nav class="pagination" aria-label="หน้า Audit logs"><span>ทั้งหมด {{ auditTotal }} รายการ</span><div><button type="button" title="หน้าก่อนหน้า" :disabled="auditPage <= 1" @click="changeAuditPage(auditPage - 1)"><ChevronLeft :size="17" /></button><strong>หน้า {{ auditPage }} / {{ auditTotalPages }}</strong><button type="button" title="หน้าถัดไป" :disabled="auditPage >= auditTotalPages" @click="changeAuditPage(auditPage + 1)"><ChevronRight :size="17" /></button></div></nav>
       </section>
     </div>
 
@@ -458,6 +524,11 @@ onBeforeUnmount(() => {
 .booking-filter .clear-filter { color: #37332f; background: #fff; border: 1px solid #c9c4bd; }
 .audit-filter { width: fit-content; padding: 8px 10px; }
 .table-wrap { overflow-x: auto; background: #fff; border: 1px solid #d6d1ca; }
+.pagination { display: flex; min-height: 52px; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 12px; color: #716b64; font-size: 13px; background: #f6f5f2; border: 1px solid #d6d1ca; border-top: 0; }
+.pagination > div { display: flex; align-items: center; gap: 10px; }
+.pagination strong { min-width: 88px; color: #3b3733; text-align: center; }
+.pagination button { display: grid; width: 34px; height: 34px; place-items: center; color: #393530; background: #fff; border: 1px solid #c8c2ba; border-radius: 3px; cursor: pointer; }
+.pagination button:disabled { color: #aaa39b; background: #efede9; cursor: not-allowed; }
 table { width: 100%; min-width: 850px; border-collapse: collapse; }
 th { padding: 12px 15px; color: #6f6962; font-size: 13px; text-align: left; background: #f6f5f2; border-bottom: 1px solid #d6d1ca; }
 td { padding: 14px 15px; font-size: 15px; border-bottom: 1px solid #ebe8e3; vertical-align: middle; }

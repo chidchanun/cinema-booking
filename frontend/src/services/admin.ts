@@ -19,6 +19,13 @@ export interface ShowtimeInput {
   seats_per_row: number
 }
 
+export interface HallSummary {
+  name: string
+  seat_rows: number
+  seats_per_row: number
+  total_seats: number
+}
+
 export interface AdminBooking {
   id: string
   booking_code: string
@@ -62,7 +69,7 @@ export function getTMDBMovie(movieID: number): Promise<TMDBMovie> {
   return apiRequest(`/admin/tmdb/movies/${movieID}`)
 }
 
-interface Paginated<T> {
+export interface Paginated<T> {
   data: T[]
   page: number
   limit: number
@@ -70,8 +77,8 @@ interface Paginated<T> {
   total_pages: number
 }
 
-export function listAdminMovies(search = ''): Promise<MovieListResponse> {
-  const query = new URLSearchParams({ page: '1', limit: '100' })
+export function listAdminMovies(search = '', page = 1, limit = 100): Promise<MovieListResponse> {
+  const query = new URLSearchParams({ page: String(page), limit: String(limit) })
   if (search.trim()) query.set('search', search.trim())
   return apiRequest<MovieListResponse>(`/admin/movies?${query.toString()}`)
 }
@@ -101,7 +108,7 @@ export function createShowtime(input: ShowtimeInput): Promise<Showtime> {
   })
 }
 
-export function listHalls(): Promise<{ data: string[] }> {
+export function listHalls(): Promise<{ data: HallSummary[] }> {
   return apiRequest('/admin/halls')
 }
 
@@ -130,10 +137,15 @@ export interface AdminBookingFilters {
   userID?: string
   from?: string
   to?: string
+  page?: number
+  limit?: number
 }
 
 export function listAdminBookings(filters: AdminBookingFilters = {}): Promise<Paginated<AdminBooking>> {
-  const query = new URLSearchParams({ page: '1', limit: '100' })
+  const query = new URLSearchParams({
+    page: String(filters.page ?? 1),
+    limit: String(filters.limit ?? 10),
+  })
   if (filters.status) query.set('status', filters.status)
   if (filters.movieID) query.set('movie_id', filters.movieID)
   if (filters.userID) query.set('user_id', filters.userID)
@@ -142,8 +154,8 @@ export function listAdminBookings(filters: AdminBookingFilters = {}): Promise<Pa
   return apiRequest(`/admin/bookings?${query.toString()}`)
 }
 
-export function listAuditLogs(action = ''): Promise<Paginated<AuditLog>> {
-  const query = new URLSearchParams({ page: '1', limit: '100' })
+export function listAuditLogs(action = '', page = 1, limit = 10): Promise<Paginated<AuditLog>> {
+  const query = new URLSearchParams({ page: String(page), limit: String(limit) })
   if (action) query.set('action', action)
   return apiRequest(`/admin/audit-logs?${query.toString()}`)
 }

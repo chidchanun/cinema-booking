@@ -72,6 +72,14 @@ type Showtime struct {
 	DeletedAt *time.Time `bson:"deleted_at,omitempty" json:"-"`
 }
 
+// HallSummary describes the seat layout reused by every showtime in a hall.
+type HallSummary struct {
+	Name        string `bson:"hall_name" json:"name"`
+	SeatRows    int    `bson:"seat_rows" json:"seat_rows"`
+	SeatsPerRow int    `bson:"seats_per_row" json:"seats_per_row"`
+	TotalSeats  int    `bson:"total_seats" json:"total_seats"`
+}
+
 type ShowtimeResponse struct {
 	ID      primitive.ObjectID `json:"id"`
 	MovieID primitive.ObjectID `json:"movie_id"`

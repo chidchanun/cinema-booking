@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { Building2, CalendarClock, Check, CircleAlert, LoaderCircle, Save, ScreenShare } from '@lucide/vue'
+import { Building2, CalendarClock, CalendarDays, Check, CircleAlert, Clock, LoaderCircle, MapPin, Save, ScreenShare } from '@lucide/vue'
 import { useRouter } from 'vue-router'
 
 import SiteHeader from '@/components/SiteHeader.vue'
 import { ApiError } from '@/services/api'
 import { checkHallAvailability, createShowtime, listAdminMovies, listHalls } from '@/services/admin'
+import type { HallSummary } from '@/services/admin'
+import { listMovieShowtimes } from '@/services/movies'
 import type { Movie, Showtime } from '@/types/movie'
 
 const router = useRouter()
@@ -14,7 +16,9 @@ const loadingMovies = ref(true)
 const saving = ref(false)
 const errorMessage = ref('')
 const createdShowtime = ref<Showtime | null>(null)
-const halls = ref<string[]>([])
+const halls = ref<HallSummary[]>([])
+const scheduledShowtimes = ref<Array<Showtime & { movie_title: string }>>([])
+const scheduleMovieFilter = ref('')
 const hallChoice = ref('')
 const checkingAvailability = ref(false)
 const hallAvailable = ref<boolean | null>(null)
@@ -42,6 +46,16 @@ const activeMovies = computed(() => movies.value.filter((movie) => movie.is_acti
 const selectedMovie = computed(() => movies.value.find((movie) => movie.id === form.movie_id))
 const addingNewHall = computed(() => hallChoice.value === '__new__')
 const totalSeats = computed(() => form.seat_rows * form.seats_per_row)
+const selectedHall = computed(() => halls.value.find((hall) => hall.name === hallChoice.value))
+const filteredShowtimes = computed(() => {
+  if (!scheduleMovieFilter.value) return scheduledShowtimes.value
+  return scheduledShowtimes.value.filter(
+    (showtime) => showtime.movie_id === scheduleMovieFilter.value,
+  )
+})
+const filteredMovieTitle = computed(
+  () => movies.value.find((movie) => movie.id === scheduleMovieFilter.value)?.title,
+)
 const estimatedEnd = computed(() => {
   if (!form.start_time || !selectedMovie.value) return ''
   const end = new Date(form.start_time)
@@ -59,6 +73,21 @@ async function loadMovies(): Promise<void> {
     const [movieResponse, hallResponse] = await Promise.all([listAdminMovies(), listHalls()])
     movies.value = movieResponse.data
     halls.value = hallResponse.data
+    const showtimeGroups = await Promise.all(
+      movieResponse.data
+        .filter((movie) => movie.is_active)
+        .map(async (movie) => {
+          try {
+            const response = await listMovieShowtimes(movie.id)
+            return response.data.map((showtime) => ({ ...showtime, movie_title: movie.title }))
+          } catch {
+            return []
+          }
+        }),
+    )
+    scheduledShowtimes.value = showtimeGroups.flat().sort(
+      (left, right) => new Date(left.start_time).getTime() - new Date(right.start_time).getTime(),
+    )
     hallChoice.value = halls.value.length > 0 ? '' : '__new__'
     if (activeMovies.value.length === 1) form.movie_id = activeMovies.value[0]?.id ?? ''
   } catch (error) {
@@ -70,7 +99,29 @@ async function loadMovies(): Promise<void> {
 
 watch(hallChoice, (choice) => {
   form.hall_name = choice === '__new__' ? '' : choice
+  const hall = halls.value.find((item) => item.name === choice)
+  if (hall) {
+    form.seat_rows = hall.seat_rows
+    form.seats_per_row = hall.seats_per_row
+  }
 })
+
+function formatScheduleDate(value: string): string {
+  return new Intl.DateTimeFormat('th-TH', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  }).format(new Date(value))
+}
+
+function formatScheduleTime(value: string): string {
+  return `${new Intl.DateTimeFormat('th-TH', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(value))} น.`
+}
 
 async function verifyHallAvailability(): Promise<void> {
   if (!form.movie_id || !form.hall_name.trim() || !form.start_time) {
@@ -118,6 +169,14 @@ async function submitShowtime(): Promise<void> {
       start_time: new Date(form.start_time).toISOString(),
       currency: form.currency.trim().toUpperCase(),
     })
+    scheduledShowtimes.value = [
+      {
+        ...createdShowtime.value,
+        movie_title: selectedMovie.value?.title ?? 'ไม่ทราบชื่อภาพยนตร์',
+      },
+      ...scheduledShowtimes.value,
+    ].sort((left, right) => new Date(left.start_time).getTime() - new Date(right.start_time).getTime())
+    await router.push('/admin')
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : 'ไม่สามารถสร้างรอบฉายได้'
   } finally {
@@ -146,12 +205,31 @@ onBeforeUnmount(() => {
         <button type="button" @click="router.push(`/movies/${createdShowtime.movie_id}`)">ดูหน้าภาพยนตร์</button>
       </div>
 
+      <section class="schedule-section" aria-labelledby="schedule-heading">
+        <div class="schedule-heading">
+          <div class="schedule-title"><CalendarDays :size="20" /><div><h2 id="schedule-heading">รอบฉายที่มีอยู่</h2><p>รอบฉายในช่วง 30 วันข้างหน้า เรียงตามวันและเวลา</p></div></div>
+          <div class="schedule-controls">
+            <label>กรองตามภาพยนตร์<select v-model="scheduleMovieFilter"><option value="">ภาพยนตร์ทั้งหมด</option><option v-for="movie in activeMovies" :key="movie.id" :value="movie.id">{{ movie.title }}</option></select></label>
+            <strong>{{ filteredShowtimes.length }} รอบ</strong>
+          </div>
+        </div>
+        <div v-if="filteredShowtimes.length" class="schedule-list">
+          <article v-for="showtime in filteredShowtimes" :key="showtime.id" class="schedule-item">
+            <div class="schedule-movie"><strong>{{ showtime.movie_title }}</strong><span>{{ formatScheduleDate(showtime.start_time) }}</span></div>
+            <span><Clock :size="15" />{{ formatScheduleTime(showtime.start_time) }}</span>
+            <span><MapPin :size="15" />{{ showtime.hall_name }}</span>
+            <span>{{ showtime.seat_rows }} แถว × {{ showtime.seats_per_row }} ที่นั่ง</span>
+          </article>
+        </div>
+        <p v-else class="empty-schedule">{{ filteredMovieTitle ? `${filteredMovieTitle} ยังไม่มีรอบฉายในช่วง 30 วันข้างหน้า` : 'ยังไม่มีรอบฉายในช่วง 30 วันข้างหน้า' }}</p>
+      </section>
+
       <form class="showtime-form" @submit.prevent="submitShowtime">
         <section class="form-section">
           <div class="section-heading"><CalendarClock :size="20" /><div><h2>ข้อมูลรอบฉาย</h2><p>เพิ่มรอบในช่วงเวลาก่อนหรือหลังรอบเดิมได้ หากเวลาฉายรวมเวลาเตรียม Hall 15 นาทีไม่ทับกัน</p></div></div>
           <div class="fields two-columns">
             <label class="wide">ภาพยนตร์<select v-model="form.movie_id" required :disabled="loadingMovies"><option value="" disabled>{{ loadingMovies ? 'กำลังโหลดภาพยนตร์' : 'เลือกภาพยนตร์' }}</option><option v-for="movie in activeMovies" :key="movie.id" :value="movie.id">{{ movie.title }} ({{ movie.duration_minutes }} นาที)</option></select></label>
-            <label>Hall<span class="hall-input"><Building2 :size="17" /><select v-model="hallChoice" required><option value="" disabled>เลือก Hall</option><option v-for="hall in halls" :key="hall" :value="hall">{{ hall }}</option><option value="__new__">+ เพิ่ม Hall ใหม่</option></select></span><small>{{ halls.length ? `พบ Hall เดิม ${halls.length} รายการ` : 'ยังไม่มี Hall ในระบบ' }}</small></label>
+            <label>Hall<span class="hall-input"><Building2 :size="17" /><select v-model="hallChoice" required><option value="" disabled>เลือก Hall</option><option v-for="hall in halls" :key="hall.name" :value="hall.name">{{ hall.name }}</option><option value="__new__">+ เพิ่ม Hall ใหม่</option></select></span><small v-if="selectedHall">ผังเดิม {{ selectedHall.seat_rows }} แถว × {{ selectedHall.seats_per_row }} ที่นั่ง</small><small v-else>{{ halls.length ? `พบ Hall เดิม ${halls.length} รายการ` : 'ยังไม่มี Hall ในระบบ' }}</small></label>
             <label v-if="addingNewHall">ชื่อ Hall ใหม่<input v-model.trim="form.hall_name" required maxlength="100" placeholder="เช่น Hall 2" /><small>ชื่อ Hall นี้จะปรากฏในรายการครั้งถัดไป</small></label>
             <label>วันและเวลาเริ่ม<input v-model="form.start_time" type="datetime-local" required :min="minimumStart" /></label>
           </div>
@@ -166,8 +244,8 @@ onBeforeUnmount(() => {
           <div class="fields four-columns">
             <label>ราคา<input v-model.number="form.price" type="number" required min="0" step="1" /></label>
             <label>สกุลเงิน<input v-model.trim="form.currency" required minlength="3" maxlength="3" disabled/></label>
-            <label>จำนวนแถว<input v-model.number="form.seat_rows" type="number" required min="1" max="26" /></label>
-            <label>ที่นั่งต่อแถว<input v-model.number="form.seats_per_row" type="number" required min="1" max="50" /></label>
+            <label>จำนวนแถว<input v-model.number="form.seat_rows" type="number" required min="1" max="26" :disabled="Boolean(selectedHall)" /></label>
+            <label>ที่นั่งต่อแถว<input v-model.number="form.seats_per_row" type="number" required min="1" max="50" :disabled="Boolean(selectedHall)" /></label>
           </div>
           <div class="seat-preview" :class="{ invalid: totalSeats > 1000 }"><span>จำนวนที่นั่งทั้งหมด</span><strong>{{ totalSeats }}</strong><small v-if="totalSeats > 1000">จำนวนที่นั่งต้องไม่เกิน 1,000 ที่</small><small v-else>แถว A–{{ String.fromCharCode(64 + form.seat_rows) }} · หมายเลข 1–{{ form.seats_per_row }}</small></div>
         </section>
@@ -186,6 +264,25 @@ onBeforeUnmount(() => {
 .page-heading h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 41px; font-weight: 500; letter-spacing: 0; }
 .page-heading span { display: block; margin-top: 9px; color: #746e67; font-size: 15px; }
 .showtime-form { margin-top: 24px; background: #fff; border: 1px solid #d4cfc8; }
+.schedule-section { margin-top: 24px; background: #fff; border: 1px solid #d4cfc8; }
+.schedule-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 22px; border-bottom: 1px solid #ded9d2; }
+.schedule-title { display: flex; align-items: center; gap: 11px; }
+.schedule-heading svg { color: #957229; }
+.schedule-heading h2, .schedule-heading p { margin: 0; }
+.schedule-heading h2 { font-size: 18px; }
+.schedule-heading p { margin-top: 3px; color: #817a72; font-size: 13px; }
+.schedule-controls { display: flex; align-items: end; gap: 12px; }
+.schedule-controls label { display: grid; gap: 5px; color: #6b655e; font-size: 12px; font-weight: 700; }
+.schedule-controls select { width: min(260px, 32vw); height: 38px; padding: 0 34px 0 10px; color: #2d2925; background: #fff; border: 1px solid #c7c1b9; border-radius: 3px; }
+.schedule-controls strong { min-width: 48px; padding-bottom: 10px; white-space: nowrap; color: #72561d; font-size: 14px; text-align: right; }
+.schedule-list { max-height: 310px; overflow-y: auto; }
+.schedule-item { display: grid; grid-template-columns: minmax(210px, 1.5fr) 120px 130px minmax(150px, .8fr); align-items: center; gap: 14px; min-height: 68px; padding: 12px 22px; border-bottom: 1px solid #ebe7e1; }
+.schedule-item:last-child { border-bottom: 0; }
+.schedule-item > span { display: inline-flex; align-items: center; gap: 6px; color: #625c55; font-size: 13px; }
+.schedule-movie { display: grid; gap: 4px; min-width: 0; }
+.schedule-movie strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.schedule-movie span { color: #817a72; font-size: 12px; }
+.empty-schedule { margin: 0; padding: 34px 22px; color: #817a72; text-align: center; }
 .form-section { padding: 27px 30px; border-bottom: 1px solid #ded9d2; }
 .section-heading { display: flex; gap: 11px; margin-bottom: 22px; }
 .section-heading svg { color: #957229; }
@@ -198,6 +295,7 @@ onBeforeUnmount(() => {
 .wide { grid-column: 1 / -1; }
 .fields label { display: flex; min-width: 0; flex-direction: column; align-self: start; gap: 7px; color: #544f49; font-size: 14px; font-weight: 700; }
 .fields input, .fields select { width: 100%; min-width: 0; height: 43px; padding: 0 11px; color: #2d2925; background: #fff; border: 1px solid #c7c1b9; border-radius: 3px; }
+.fields input:disabled { color: #625c55; background: #f1efeb; cursor: not-allowed; }
 .fields label > small { color: #8a837b; font-size: 12px; font-weight: 500; }
 .hall-input { position: relative; display: block; }
 .hall-input svg { position: absolute; top: 50%; left: 11px; color: #777068; pointer-events: none; transform: translateY(-50%); }
@@ -226,8 +324,14 @@ onBeforeUnmount(() => {
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 700px) {
   .showtime-layout { width: calc(100% - 28px); padding-top: 30px; }
+  .schedule-heading { align-items: stretch; flex-direction: column; }
+  .schedule-controls { align-items: end; }
+  .schedule-controls label { flex: 1; }
+  .schedule-controls select { width: 100%; }
   .form-section { padding: 22px 18px; }
   .two-columns, .four-columns { grid-template-columns: 1fr; }
+  .schedule-item { grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+  .schedule-movie { grid-column: 1 / -1; }
   .wide { grid-column: auto; }
   .form-actions { padding: 18px; }
   .form-message.success { align-items: start; flex-wrap: wrap; }

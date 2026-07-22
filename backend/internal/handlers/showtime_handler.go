@@ -42,7 +42,7 @@ type ShowtimeService interface {
 		ctx context.Context,
 		id primitive.ObjectID,
 	) error
-	ListHallNames(ctx context.Context) ([]string, error)
+	ListHalls(ctx context.Context) ([]models.HallSummary, error)
 	CheckHallAvailability(
 		ctx context.Context,
 		movieID primitive.ObjectID,
@@ -52,7 +52,7 @@ type ShowtimeService interface {
 }
 
 func (h *ShowtimeHandler) ListHalls(c *gin.Context) {
-	halls, err := h.showtimeService.ListHallNames(c.Request.Context())
+	halls, err := h.showtimeService.ListHalls(c.Request.Context())
 	if err != nil {
 		_ = c.Error(err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal_server_error", "message": "Unable to retrieve halls"})

@@ -43,7 +43,7 @@ type ShowtimeRepository interface {
 		startTime time.Time,
 		endTime time.Time,
 	) (bool, error)
-	ListHallNames(ctx context.Context) ([]string, error)
+	ListHalls(ctx context.Context) ([]models.HallSummary, error)
 
 	Cancel(
 		ctx context.Context,
@@ -81,8 +81,8 @@ type ShowtimeAvailability struct {
 	EndTime   time.Time
 }
 
-func (s *ShowtimeService) ListHallNames(ctx context.Context) ([]string, error) {
-	return s.showtimeRepository.ListHallNames(ctx)
+func (s *ShowtimeService) ListHalls(ctx context.Context) ([]models.HallSummary, error) {
+	return s.showtimeRepository.ListHalls(ctx)
 }
 
 func (s *ShowtimeService) CheckHallAvailability(
@@ -155,6 +155,22 @@ func (s *ShowtimeService) CreateShowtime(
 
 	if !movie.IsActive {
 		return nil, ErrMovieUnavailable
+	}
+
+	halls, err := s.showtimeRepository.ListHalls(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("read hall layout: %w", err)
+	}
+	for _, hall := range halls {
+		if hall.Name == input.HallName &&
+			(hall.SeatRows != input.SeatRows || hall.SeatsPerRow != input.SeatsPerRow) {
+			return nil, fmt.Errorf(
+				"%w: existing hall layout is %d rows by %d seats",
+				ErrInvalidShowtimeData,
+				hall.SeatRows,
+				hall.SeatsPerRow,
+			)
+		}
 	}
 
 	/*

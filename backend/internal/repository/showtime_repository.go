@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
@@ -200,25 +199,47 @@ func (r *ShowtimeRepository) HasHallConflict(
 	return true, nil
 }
 
-func (r *ShowtimeRepository) ListHallNames(ctx context.Context) ([]string, error) {
-	values, err := r.collection.Distinct(
+func (r *ShowtimeRepository) ListHalls(ctx context.Context) ([]models.HallSummary, error) {
+	cursor, err := r.collection.Find(
 		ctx,
-		"hall_name",
 		bson.M{"deleted_at": nil},
+		options.Find().
+			SetProjection(bson.M{
+				"hall_name":     1,
+				"seat_rows":     1,
+				"seats_per_row": 1,
+				"total_seats":   1,
+			}).
+			SetSort(bson.D{
+				{Key: "hall_name", Value: 1},
+				{Key: "updated_at", Value: -1},
+			}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list hall names: %w", err)
+		return nil, fmt.Errorf("list halls: %w", err)
 	}
+	defer cursor.Close(ctx)
 
-	halls := make([]string, 0, len(values))
-	for _, value := range values {
-		name, ok := value.(string)
-		name = strings.TrimSpace(name)
-		if ok && name != "" {
-			halls = append(halls, name)
+	halls := make([]models.HallSummary, 0)
+	seen := make(map[string]struct{})
+	for cursor.Next(ctx) {
+		var hall models.HallSummary
+		if err := cursor.Decode(&hall); err != nil {
+			return nil, fmt.Errorf("decode hall: %w", err)
 		}
+		hall.Name = strings.TrimSpace(hall.Name)
+		if hall.Name == "" {
+			continue
+		}
+		if _, exists := seen[hall.Name]; exists {
+			continue
+		}
+		seen[hall.Name] = struct{}{}
+		halls = append(halls, hall)
 	}
-	sort.Strings(halls)
+	if err := cursor.Err(); err != nil {
+		return nil, fmt.Errorf("iterate halls: %w", err)
+	}
 	return halls, nil
 }
 
