@@ -111,7 +111,6 @@ onMounted(initializeLogin)
         <span class="brand-mark"><Ticket :size="20" stroke-width="1.8" /></span>
         <span>CINEMA BOOKING</span>
       </a>
-      <span class="secure-label"><ShieldCheck :size="16" /> Secure access</span>
     </header>
 
     <section class="login-layout" aria-labelledby="login-title">
