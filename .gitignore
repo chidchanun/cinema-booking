@@ -1,0 +1,26 @@
+# Environment files may contain credentials and signing secrets.
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+# Frontend dependencies and build output.
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Go build and test output.
+backend/bin/
+backend/coverage.out
+*.test
+
+# Local tooling and temporary artifacts.
+.vscode/
+.idea/
+tmp/
+*.log
+
+# Operating system files.
+.DS_Store
+Thumbs.db

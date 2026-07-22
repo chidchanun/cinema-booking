@@ -1,0 +1,228 @@
+services:
+  mongodb-keyfile-init:
+    image: alpine:3.22
+    container_name: cinema-mongodb-keyfile-init
+    restart: "no"
+    user: "0:0"
+    volumes:
+      - mongodb_keyfile:/keyfile
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -s /keyfile/mongodb-keyfile ]; then
+          head -c 756 /dev/urandom | base64 > /keyfile/mongodb-keyfile
+        fi
+        chown 999:999 /keyfile/mongodb-keyfile
+        chmod 400 /keyfile/mongodb-keyfile
+
+  mongodb:
+    image: mongo:8
+    container_name: cinema-mongodb
+    restart: unless-stopped
+
+    depends_on:
+      mongodb-keyfile-init:
+        condition: service_completed_successfully
+
+    ports:
+      - "27017:27017"
+
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_keyfile:/etc/mongodb-keyfile:ro
+    command:
+      - mongod
+      - --replSet
+      - rs0
+      - --keyFile
+      - /etc/mongodb-keyfile/mongodb-keyfile
+      - --bind_ip_all
+    healthcheck:
+      test: ['CMD-SHELL', 'mongosh --quiet --host 127.0.0.1 --port 27017 --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "quit(db.adminCommand(''ping'').ok ? 0 : 2)"']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  mongodb-replica-init:
+    image: mongo:8
+    container_name: cinema-mongodb-replica-init
+    restart: "no"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+    entrypoint:
+      - bash
+      - -c
+      - |
+        mongosh --quiet --host mongodb --port 27017 \
+          --username "$$MONGO_ROOT_USERNAME" \
+          --password "$$MONGO_ROOT_PASSWORD" \
+          --authenticationDatabase admin \
+          --eval 'try { quit(rs.status().ok ? 0 : 1) } catch (error) { quit(rs.initiate({_id: "rs0", members: [{_id: 0, host: "mongodb:27017"}]}).ok ? 0 : 1) }'
+
+  mongodb-admin-seed:
+    image: mongo:8
+    container_name: cinema-mongodb-admin-seed
+    restart: "no"
+    depends_on:
+      mongodb-replica-init:
+        condition: service_completed_successfully
+    environment:
+      MONGO_ROOT_USERNAME: ${MONGO_ROOT_USERNAME}
+      MONGO_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD}
+      MONGO_DATABASE: ${MONGO_DATABASE:-cinema_booking}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    entrypoint:
+      - bash
+      - -c
+      - |
+        if [ -z "$${ADMIN_EMAIL// }" ]; then
+          echo "ADMIN_EMAIL is empty; skipping admin seed"
+          exit 0
+        fi
+
+        mongosh --quiet --host mongodb --port 27017 \
+          --username "$$MONGO_ROOT_USERNAME" \
+          --password "$$MONGO_ROOT_PASSWORD" \
+          --authenticationDatabase admin \
+          --eval '
+            const email = process.env.ADMIN_EMAIL.trim().toLowerCase();
+            if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$$/.test(email)) {
+              throw new Error("ADMIN_EMAIL is invalid");
+            }
+            const now = new Date();
+            const result = db.getSiblingDB(process.env.MONGO_DATABASE).users.updateOne(
+              { email },
+              {
+                $$set: { role: "ADMIN", updated_at: now },
+                $$setOnInsert: {
+                  email,
+                  email_verified: false,
+                  name: email,
+                  picture: "",
+                  created_at: now,
+                  last_login_at: new Date(0)
+                }
+              },
+              { upsert: true }
+            );
+            print(`Admin seed complete for $${email}: matched=$${result.matchedCount}, upserted=$${result.upsertedCount}`);
+          '
+
+  redis:
+    image: redis:7-alpine
+    container_name: cinema-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --notify-keyspace-events
+      - "Ex"
+    volumes:
+      - cinema_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:4-management-alpine
+    container_name: cinema-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  audit-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cinema-audit-worker
+    restart: unless-stopped
+    depends_on:
+      mongodb-replica-init:
+        condition: service_completed_successfully
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD_URI}@mongodb:27017/?authSource=admin&replicaSet=rs0&directConnection=true
+      MONGO_DATABASE: ${MONGO_DATABASE:-cinema_booking}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+    command: ["audit-worker"]
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: cinema-api
+    restart: unless-stopped
+    depends_on:
+      mongodb-replica-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      APP_PORT: "9000"
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      MONGO_URI: mongodb://${MONGO_ROOT_USERNAME}:${MONGO_ROOT_PASSWORD_URI}@mongodb:27017/?authSource=admin&replicaSet=rs0&directConnection=true
+      MONGO_DATABASE: ${MONGO_DATABASE:-cinema_booking}
+      REDIS_ADDR: redis:6379
+      RABBITMQ_URL: amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672/
+    ports:
+      - "${API_PORT:-9000}:9000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9000/health/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+    container_name: cinema-frontend
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "${FRONTEND_PORT:-5173}:80"
+
+volumes:
+  mongodb_data:
+  mongodb_keyfile:
+  cinema_redis_data:
+  rabbitmq_data:
