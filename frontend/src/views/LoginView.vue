@@ -236,13 +236,6 @@ a {
   border-radius: 4px;
 }
 
-.secure-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  color: rgba(255, 255, 255, 0.78);
-  font-size: 15px;
-}
 
 .login-layout {
   display: grid;
@@ -388,9 +381,7 @@ a {
     width: min(100% - 36px, 560px);
   }
 
-  .secure-label {
-    display: none;
-  }
+
 
   .login-shell {
     min-height: 100svh;
