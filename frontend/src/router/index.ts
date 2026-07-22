@@ -39,13 +39,6 @@ const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
-      path: '/bookings/history',
-      name: 'booking-history',
-      component: () => import('@/views/MyBookingsView.vue'),
-      props: { history: true },
-      meta: { requiresAuth: true },
-    },
-    {
       path: '/admin',
       name: 'admin',
       component: () => import('@/views/AdminDashboardView.vue'),

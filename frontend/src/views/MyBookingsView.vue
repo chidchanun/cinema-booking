@@ -5,24 +5,65 @@ import { CalendarDays, Clock3, LoaderCircle, Ticket } from '@lucide/vue'
 import SiteHeader from '@/components/SiteHeader.vue'
 import { ApiError } from '@/services/api'
 import { listMyBookings, type Booking } from '@/services/bookings'
+import { listMovies } from '@/services/movies'
 import {
   listPendingReservations,
   type PendingReservation,
 } from '@/services/pendingReservations'
 
-const props = withDefaults(defineProps<{ history?: boolean }>(), { history: false })
 const bookings = ref<Booking[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
 const pendingReservations = ref<PendingReservation[]>([])
+const movieTitles = ref<Record<string, string>>({})
+const movieFilter = ref('')
+const dateFilter = ref('')
 
 const visibleBookings = computed(() => {
   const now = Date.now()
   return bookings.value.filter((booking) => {
     const isHistory = booking.status === 'CANCELLED' || new Date(booking.showtime_start).getTime() < now
-    return props.history ? isHistory : !isHistory
+    if (isHistory) return false
+    if (movieFilter.value && booking.movie_id !== movieFilter.value) return false
+    return !dateFilter.value || localDate(booking.showtime_start) === dateFilter.value
   })
 })
+const movieOptions = computed(() => {
+  const options = new Map<string, string>()
+  for (const booking of bookings.value) {
+    options.set(booking.movie_id, movieTitles.value[booking.movie_id] ?? booking.movie_id)
+  }
+  for (const reservation of pendingReservations.value) {
+    if (reservation.movie_id) options.set(reservation.movie_id, reservation.movie_title)
+  }
+  return [...options.entries()]
+    .map(([id, title]) => ({ id, title }))
+    .sort((left, right) => left.title.localeCompare(right.title, 'th'))
+})
+const selectedMovieTitle = computed(
+  () => movieOptions.value.find((movie) => movie.id === movieFilter.value)?.title,
+)
+const visiblePendingReservations = computed(() =>
+  pendingReservations.value.filter((reservation) => {
+    if (
+      movieFilter.value &&
+      reservation.movie_id !== movieFilter.value &&
+      reservation.movie_title !== selectedMovieTitle.value
+    ) return false
+    return !dateFilter.value || localDate(reservation.showtime_start) === dateFilter.value
+  }),
+)
+
+function localDate(value: string): string {
+  const date = new Date(value)
+  const offset = date.getTimezoneOffset() * 60_000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 10)
+}
+
+function clearFilters(): void {
+  movieFilter.value = ''
+  dateFilter.value = ''
+}
 
 function formatDate(value: string): string {
   const dateTime = new Intl.DateTimeFormat('th-TH', {
@@ -43,9 +84,15 @@ async function loadBookings(): Promise<void> {
   loading.value = true
   errorMessage.value = ''
   try {
-    pendingReservations.value = props.history ? [] : listPendingReservations()
-    const response = await listMyBookings()
-    bookings.value = response.data
+    pendingReservations.value = listPendingReservations()
+    const [bookingResponse, movieResponse] = await Promise.all([
+      listMyBookings(),
+      listMovies('', undefined, 100),
+    ])
+    bookings.value = bookingResponse.data
+    movieTitles.value = Object.fromEntries(
+      movieResponse.data.map((movie) => [movie.id, movie.title]),
+    )
   } catch (error) {
     errorMessage.value = error instanceof ApiError ? error.message : 'ไม่สามารถโหลดรายการจองได้'
   } finally {
@@ -58,14 +105,20 @@ onMounted(loadBookings)
 
 <template>
   <main class="bookings-page">
-    <SiteHeader :section="history ? 'ประวัติการสั่งซื้อ' : 'ตั๋วของฉัน'" />
+    <SiteHeader section="ตั๋วของฉัน" />
     <section class="bookings-shell">
       <header class="page-heading">
         <p>MY BOOKINGS</p>
-        <h1>{{ history ? 'ประวัติการสั่งซื้อ' : 'ตั๋วของฉัน' }}</h1>
+        <h1>ตั๋วของฉัน</h1>
       </header>
 
-      <section v-if="pendingReservations.length" class="pending-section" aria-labelledby="pending-title">
+      <section class="booking-filters" aria-label="ตัวกรองตั๋ว">
+        <label>ภาพยนตร์<select v-model="movieFilter"><option value="">ทุกเรื่อง</option><option v-for="movie in movieOptions" :key="movie.id" :value="movie.id">{{ movie.title }}</option></select></label>
+        <label>วันที่ฉาย<input v-model="dateFilter" type="date" /></label>
+        <button type="button" :disabled="!movieFilter && !dateFilter" @click="clearFilters">ล้างตัวกรอง</button>
+      </section>
+
+      <section v-if="visiblePendingReservations.length" class="pending-section" aria-labelledby="pending-title">
         <div class="pending-heading">
           <div>
             <p>WAITING FOR PAYMENT</p>
@@ -74,7 +127,7 @@ onMounted(loadBookings)
           <span>ที่นั่งจะถูกปล่อยอัตโนมัติเมื่อหมดเวลา</span>
         </div>
         <article
-          v-for="reservation in pendingReservations"
+          v-for="reservation in visiblePendingReservations"
           :key="reservation.showtime_id"
           class="pending-row"
         >
@@ -91,13 +144,14 @@ onMounted(loadBookings)
         <p>{{ errorMessage }}</p>
         <button type="button" @click="loadBookings">ลองอีกครั้ง</button>
       </div>
-      <div v-else-if="visibleBookings.length === 0" class="status empty">
+      <div v-else-if="visibleBookings.length === 0 && visiblePendingReservations.length === 0" class="status empty">
         <Ticket :size="34" />
-        <h2>{{ history ? 'ยังไม่มีประวัติการสั่งซื้อ' : 'ยังไม่มีตั๋วที่กำลังจะมาถึง' }}</h2>
+        <h2>{{ movieFilter || dateFilter ? 'ไม่พบตั๋วตามตัวกรอง' : 'ยังไม่มีตั๋วที่กำลังจะมาถึง' }}</h2>
       </div>
       <div v-else class="booking-list">
         <article v-for="booking in visibleBookings" :key="booking.id" class="booking-row">
           <div class="booking-code"><span>BOOKING CODE</span><strong>{{ booking.booking_code }}</strong></div>
+          <div><span>ภาพยนตร์</span><strong>{{ movieTitles[booking.movie_id] ?? 'ไม่พบชื่อภาพยนตร์' }}</strong></div>
           <div><span>ที่นั่ง</span><strong>{{ booking.seat_code }}</strong></div>
           <div><span>โรง</span><strong>{{ booking.hall_name }}</strong></div>
           <div class="showtime"><span><CalendarDays :size="14" /> รอบฉาย</span><strong>{{ formatDate(booking.showtime_start) }}</strong></div>
@@ -114,6 +168,11 @@ onMounted(loadBookings)
 .page-heading { padding-bottom: 26px; border-bottom: 1px solid #d0cbc4; }
 .page-heading p { margin: 0 0 8px; color: #936f25; font-size: 13px; font-weight: 800; }
 .page-heading h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 40px; font-weight: 500; letter-spacing: 0; }
+.booking-filters { display: flex; align-items: end; gap: 12px; margin-top: 22px; padding: 14px 16px; background: #fff; border: 1px solid #d8d3cc; }
+.booking-filters label { display: grid; min-width: min(260px, 34vw); gap: 6px; color: #706a63; font-size: 13px; font-weight: 700; }
+.booking-filters select, .booking-filters input { width: 100%; height: 40px; padding: 0 10px; color: #302c28; background: #fff; border: 1px solid #c9c3bb; border-radius: 3px; }
+.booking-filters button { min-height: 40px; padding: 0 14px; color: #393530; background: #fff; border: 1px solid #c9c3bb; border-radius: 3px; cursor: pointer; }
+.booking-filters button:disabled { cursor: not-allowed; opacity: .5; }
 .pending-section { margin-top: 24px; padding-bottom: 22px; border-bottom: 1px solid #d0cbc4; }
 .pending-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 12px; }
 .pending-heading p { margin: 0 0 5px; color: #936f25; font-size: 12px; font-weight: 800; }
@@ -125,7 +184,7 @@ onMounted(loadBookings)
 .pending-row strong { overflow-wrap: anywhere; font-size: 15px; }
 .pay-link { display: inline-flex; min-height: 40px; align-items: center; justify-content: center; padding: 0 17px; color: #fff; background: #8b681f; border-radius: 4px; font-weight: 750; text-decoration: none; white-space: nowrap; }
 .booking-list { display: grid; gap: 10px; margin-top: 24px; }
-.booking-row { display: grid; grid-template-columns: 1.35fr .65fr .8fr 1.5fr .8fr; gap: 18px; align-items: center; padding: 20px; background: #fff; border: 1px solid #d8d3cc; border-left: 4px solid #b48a36; border-radius: 4px; }
+.booking-row { display: grid; grid-template-columns: 1.25fr 1.1fr .55fr .65fr 1.35fr .7fr; gap: 16px; align-items: center; padding: 20px; background: #fff; border: 1px solid #d8d3cc; border-left: 4px solid #b48a36; border-radius: 4px; }
 .booking-row > div { display: grid; gap: 5px; min-width: 0; }
 .booking-row span { display: flex; align-items: center; gap: 5px; color: #7a746d; font-size: 13px; }
 .booking-row strong { overflow-wrap: anywhere; font-size: 16px; }
@@ -139,6 +198,8 @@ onMounted(loadBookings)
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (max-width: 760px) {
   .bookings-shell { width: calc(100% - 28px); padding-top: 34px; }
+  .booking-filters { align-items: stretch; flex-direction: column; }
+  .booking-filters label { width: 100%; min-width: 0; }
   .booking-row { grid-template-columns: 1fr 1fr; }
   .booking-code, .showtime { grid-column: 1 / -1; }
   .pending-heading { align-items: start; flex-direction: column; }

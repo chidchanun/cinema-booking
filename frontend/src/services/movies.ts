@@ -1,8 +1,8 @@
 import { apiRequest } from './api'
 import type { Movie, MovieListResponse, ShowtimeListResponse } from '@/types/movie'
 
-export function listMovies(search = '', signal?: AbortSignal): Promise<MovieListResponse> {
-  const query = new URLSearchParams({ page: '1', limit: '24' })
+export function listMovies(search = '', signal?: AbortSignal, limit = 24): Promise<MovieListResponse> {
+  const query = new URLSearchParams({ page: '1', limit: String(limit) })
   if (search.trim()) query.set('search', search.trim())
   return apiRequest<MovieListResponse>(`/movies?${query.toString()}`, { signal })
 }

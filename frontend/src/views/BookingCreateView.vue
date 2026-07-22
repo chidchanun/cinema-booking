@@ -220,6 +220,7 @@ async function beginPayment(): Promise<void> {
   if (showtime.value) {
     savePendingReservation({
       showtime_id: props.showtimeId,
+      movie_id: showtime.value.movie_id,
       movie_title: movie.value?.title ?? 'Movie',
       hall_name: showtime.value.hall_name,
       showtime_start: showtime.value.start_time,

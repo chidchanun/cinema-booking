@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import {
   ArrowLeft,
   ChevronDown,
-  History,
   LoaderCircle,
   LogIn,
   LogOut,
@@ -140,10 +139,6 @@ onBeforeUnmount(() => {
           <RouterLink class="menu-item" to="/bookings" role="menuitem" @click="menuOpen = false">
             <Ticket :size="18" />
             <span>ตั๋วของฉัน</span>
-          </RouterLink>
-          <RouterLink class="menu-item" to="/bookings/history" role="menuitem" @click="menuOpen = false">
-            <History :size="18" />
-            <span>ประวัติการสั่งซื้อ</span>
           </RouterLink>
           <RouterLink
             v-if="session.user.role === 'ADMIN'"

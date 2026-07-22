@@ -4,6 +4,7 @@ const PREFIX = 'cinema.pending_reservation.'
 
 export interface PendingReservation {
   showtime_id: string
+  movie_id?: string
   movie_title: string
   hall_name: string
   showtime_start: string
