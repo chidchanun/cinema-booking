@@ -64,6 +64,53 @@ jobs:
       - name: Run integration tests
         working-directory: backend
         run: go test -tags=integration ./tests/integration -v -count=1
+      - name: Create container runtime configuration
+        run: |
+          cat > backend/.env <<'EOF'
+          APP_NAME=Cinema Booking CI
+          APP_PORT=9000
+          CORS_ALLOWED_ORIGINS=http://localhost:5173
+          MONGO_URI=mongodb://integration:integration_password@mongodb:27017/?authSource=admin&replicaSet=rs0&directConnection=true
+          MONGO_DATABASE=cinema_booking
+          REDIS_ADDR=redis:6379
+          REDIS_DB=0
+          SEAT_LOCK_TTL=5m
+          RATE_LIMIT_WINDOW=1m
+          RATE_LIMIT_AUTH=10
+          RATE_LIMIT_MUTATION=60
+          RATE_LIMIT_WEBSOCKET=20
+          RABBITMQ_URL=amqp://cinema:cinema_secret@rabbitmq:5672/
+          RABBITMQ_EXCHANGE=cinema.events
+          RABBITMQ_AUDIT_QUEUE=cinema.audit.events
+          RABBITMQ_DEAD_LETTER_EXCHANGE=cinema.events.dlx
+          RABBITMQ_AUDIT_DLQ=cinema.audit.events.dlq
+          RABBITMQ_PREFETCH=10
+          RABBITMQ_PUBLISH_TIMEOUT=3s
+          JWT_SECRET=integration-only-secret-at-least-32-characters
+          JWT_ISSUER=cinema-booking-api
+          JWT_ACCESS_TTL=15m
+          COOKIE_NAME=cinema_access_token
+          COOKIE_SECURE=false
+          COOKIE_SAME_SITE=lax
+          GOOGLE_CLIENT_ID=integration-client-id.apps.googleusercontent.com
+          SMTP_HOST=localhost
+          SMTP_PORT=2525
+          SMTP_FROM=Cinema Booking <no-reply@cinema.local>
+          EOF
+      - name: Build and start the complete application
+        run: docker compose up -d --build api audit-worker frontend
+      - name: Smoke test API and frontend
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent http://localhost:9000/health/ready >/dev/null && \
+               curl --fail --silent http://localhost:5173/ >/dev/null && \
+               curl --fail --silent http://localhost:5173/api/v1/movies >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker compose ps
+          exit 1
       - name: Show container logs on failure
         if: failure()
         run: docker compose logs --no-color mongodb mongodb-replica-init redis rabbitmq

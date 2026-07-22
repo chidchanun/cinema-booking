@@ -1,0 +1,132 @@
+{
+  "info": {
+    "name": "Cinema Booking API",
+    "description": "Core public, authentication, seat-lock, booking, and admin requests. Run Google Login first, then set movie_id/showtime_id/seat_code as needed.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": { "type": "noauth" },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "const method = pm.request.method.toUpperCase();",
+          "if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {",
+          "  const csrf = pm.environment.get('csrf_token');",
+          "  if (csrf) pm.request.headers.upsert({ key: 'X-CSRF-Token', value: csrf });",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:9000/api/v1" },
+    { "key": "health_url", "value": "http://localhost:9000/health/ready" },
+    { "key": "google_id_token", "value": "" },
+    { "key": "movie_id", "value": "" },
+    { "key": "showtime_id", "value": "" },
+    { "key": "seat_code", "value": "A1" },
+    { "key": "lock_id", "value": "" },
+    { "key": "booking_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "System",
+      "item": [
+        {
+          "name": "Readiness",
+          "request": { "method": "GET", "url": "{{health_url}}" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('API is ready', () => pm.response.to.have.status(200));"] } }]
+        }
+      ]
+    },
+    {
+      "name": "Authentication",
+      "item": [
+        {
+          "name": "Google Login",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"id_token\": \"{{google_id_token}}\"\n}" },
+            "url": "{{base_url}}/auth/google"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Login succeeds', () => pm.response.to.have.status(200));", "const body = pm.response.json();", "if (body.csrf_token) pm.environment.set('csrf_token', body.csrf_token);"] } }]
+        },
+        {
+          "name": "Current User",
+          "request": { "method": "GET", "url": "{{base_url}}/auth/me" }
+        },
+        {
+          "name": "Logout",
+          "request": { "method": "POST", "url": "{{base_url}}/auth/logout" }
+        }
+      ]
+    },
+    {
+      "name": "Catalog",
+      "item": [
+        {
+          "name": "List Movies",
+          "request": { "method": "GET", "url": "{{base_url}}/movies?page=1&limit=20" },
+          "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.data?.[0]?.id) pm.environment.set('movie_id', body.data[0].id);"] } }]
+        },
+        {
+          "name": "Movie Showtimes",
+          "request": { "method": "GET", "url": "{{base_url}}/movies/{{movie_id}}/showtimes" },
+          "event": [{ "listen": "test", "script": { "exec": ["const body = pm.response.json();", "if (body.data?.[0]?.id) pm.environment.set('showtime_id', body.data[0].id);"] } }]
+        },
+        {
+          "name": "Seat Map",
+          "request": { "method": "GET", "url": "{{base_url}}/showtimes/{{showtime_id}}/seats" }
+        }
+      ]
+    },
+    {
+      "name": "Booking Flow",
+      "item": [
+        {
+          "name": "Lock Seat",
+          "request": { "method": "POST", "url": "{{base_url}}/showtimes/{{showtime_id}}/seats/{{seat_code}}/lock" },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Seat is locked', () => pm.response.to.have.status(200));", "const body = pm.response.json();", "if (body.lock_id) pm.environment.set('lock_id', body.lock_id);"] } }]
+        },
+        {
+          "name": "Confirm Booking",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"showtime_id\": \"{{showtime_id}}\",\n  \"seat_code\": \"{{seat_code}}\",\n  \"lock_id\": \"{{lock_id}}\"\n}" },
+            "url": "{{base_url}}/bookings/confirm"
+          },
+          "event": [{ "listen": "test", "script": { "exec": ["pm.test('Booking is created', () => pm.response.to.have.status(201));", "const body = pm.response.json();", "if (body.id) pm.environment.set('booking_id', body.id);"] } }]
+        },
+        {
+          "name": "Release Seat",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "X-Seat-Lock-Token", "value": "{{lock_id}}" }],
+            "url": "{{base_url}}/showtimes/{{showtime_id}}/seats/{{seat_code}}/lock"
+          }
+        },
+        {
+          "name": "My Bookings",
+          "request": { "method": "GET", "url": "{{base_url}}/bookings?page=1&limit=100" }
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "item": [
+        {
+          "name": "List Bookings",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/bookings?page=1&limit=100&status=BOOKED" }
+        },
+        {
+          "name": "Audit Logs",
+          "request": { "method": "GET", "url": "{{base_url}}/admin/audit-logs?page=1&limit=100" }
+        }
+      ]
+    }
+  ]
+}

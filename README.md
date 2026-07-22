@@ -281,7 +281,8 @@ npm install
 npm run dev
 ```
 
-The Vue application is currently a scaffold and does not yet implement the complete booking UI.
+The Vue development server runs at `http://localhost:5173` and proxies API
+requests according to `frontend/.env`.
 
 ### Verification
 
@@ -296,6 +297,67 @@ npm run test:unit -- --run
 npm run build
 ```
 
+### Postman collection
+
+Import both files into Postman:
+
+- [`postman/Cinema_Booking.postman_collection.json`](postman/Cinema_Booking.postman_collection.json)
+- [`postman/Local.postman_environment.json`](postman/Local.postman_environment.json)
+
+Select the **Cinema Booking Local** environment. Put a current Google ID token
+in `google_id_token`, then run **Google Login**. Its test script stores the CSRF
+token automatically. **Lock Seat** stores `lock_id` for the confirm or release
+request. Postman keeps the authentication cookie in its cookie jar.
+
+### Testing scenarios
+
+#### Concurrent seat lock
+
+1. Sign in with two different browser profiles.
+2. Open the same showtime and select the same available seat at nearly the same time.
+3. Expect one request to receive the lock and the other to receive HTTP `409`.
+4. Confirm that both clients display `LOCKED` without refreshing.
+
+The automated Redis integration test starts concurrent contenders and asserts
+that exactly one obtains the lock.
+
+#### Lock expiry and realtime release
+
+1. Select a seat but do not complete payment.
+2. Wait for `SEAT_LOCK_TTL` (five minutes by default).
+3. Expect the seat to return to `AVAILABLE` for connected clients.
+4. Expect a `BOOKING_TIMEOUT` record in Admin > Audit Logs.
+
+The WebSocket test opens a real upgraded connection and verifies ordered
+`LOCKED` and `AVAILABLE` events.
+
+#### Audit worker recovery
+
+```powershell
+docker compose stop audit-worker
+docker exec cinema-rabbitmq rabbitmqctl list_queues name messages_ready consumers
+```
+
+Perform a booking or seat release. Expect `messages_ready` to increase while
+`consumers` is zero. Restart the worker and expect the queue to drain and the
+new record to appear in MongoDB:
+
+```powershell
+docker compose start audit-worker
+docker compose logs -f audit-worker
+```
+
+#### Redis failure
+
+```powershell
+docker compose stop redis
+```
+
+Load a seat map or attempt a lock. Expect a service-unavailable response and a
+`SYSTEM_ERROR` audit event with component `REDIS_LOCK`. Keep RabbitMQ and the
+audit worker running so the failure event can be persisted. Restore Redis with
+`docker compose start redis`.
+
 ## 7. Assumptions and Trade-offs
 
 - Payment is mocked; no external payment gateway is required.
@@ -305,7 +367,7 @@ npm run build
 - Redis keyspace notifications are lossy during subscriber downtime. MongoDB remains the durable source of seat state.
 - RabbitMQ uses at-least-once delivery, so consumers must remain idempotent.
 - Publishing occurs after the MongoDB booking transaction. A process crash between commit and publish can lose an event; a transactional outbox is the production-grade solution.
-- Booking confirmation uses a MongoDB transaction. The current Compose MongoDB service is standalone; transactions require a replica set. Configure a single-node replica set for local transaction testing and a multi-node replica set in production.
+- Booking confirmation uses a MongoDB transaction. Compose configures a single-node replica set for local development; production should use a multi-node replica set.
 - The complete system runs through Compose. The API and frontend may also run
   as host processes during development.
 - Admin authorization is enforced by backend role middleware. Frontend route guards are only a user-experience feature.
@@ -320,6 +382,6 @@ All routes use the `/api/v1` prefix.
 | Movies | `GET /movies`, `GET /movies/:movieID` |
 | Showtimes | `GET /movies/:movieID/showtimes`, `GET /showtimes/:showtimeID` |
 | Seats | `GET /showtimes/:showtimeID/seats`, `POST/DELETE .../:seatCode/lock` |
-| Bookings | `POST /bookings/confirm`, `GET /bookings`, `GET /bookings/:bookingID` |
+| Bookings | `POST /bookings/confirm`, `POST /bookings/confirm-many`, `GET /bookings`, `GET /bookings/:bookingID` |
 | Realtime | `GET /ws/showtimes/:showtimeID/seats` |
 | Admin | Movie and showtime management under `/admin` |

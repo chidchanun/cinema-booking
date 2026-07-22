@@ -14,12 +14,17 @@ type roomMessage struct {
 	payload    []byte
 }
 
+type registration struct {
+	client *Client
+	done   chan struct{}
+}
+
 // Hub เป็นศูนย์กลางจัดการ WebSocket clients แยกตาม showtime room
 // ทุกการแก้ rooms map ทำผ่าน Run event loop เพียง goroutine เดียว
 type Hub struct {
 	rooms map[string]map[*Client]struct{}
 
-	register   chan *Client
+	register   chan registration
 	unregister chan *Client
 	broadcast  chan roomMessage
 
@@ -42,7 +47,7 @@ func NewHub(
 		),
 
 		register: make(
-			chan *Client,
+			chan registration,
 			64,
 		),
 		unregister: make(
@@ -71,8 +76,9 @@ func (h *Hub) Run(
 
 	for {
 		select {
-		case client := <-h.register:
-			h.registerClient(client)
+		case request := <-h.register:
+			h.registerClient(request.client)
+			close(request.done)
 
 		case client := <-h.unregister:
 			h.unregisterClient(client)
@@ -96,9 +102,17 @@ func (h *Hub) Register(
 		return fmt.Errorf("realtime client is nil")
 	}
 
+	request := registration{client: client, done: make(chan struct{})}
 	select {
-	case h.register <- client:
-		return nil
+	case h.register <- request:
+		select {
+		case <-request.done:
+			return nil
+		case <-h.done:
+			return ErrRealtimeClosed
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 
 	case <-h.done:
 		return ErrRealtimeClosed
