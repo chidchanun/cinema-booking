@@ -58,7 +58,9 @@ jobs:
           go-version: "1.25.x"
           cache-dependency-path: backend/go.sum
       - name: Start integration infrastructure
-        run: docker compose up -d --wait mongodb-replica-init redis rabbitmq
+        run: docker compose up -d --wait mongodb redis rabbitmq
+      - name: Initialize MongoDB replica set
+        run: docker compose run --rm --no-deps mongodb-replica-init
       - name: Run integration tests
         working-directory: backend
         run: go test -tags=integration ./tests/integration -v -count=1

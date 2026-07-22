@@ -176,7 +176,8 @@ func createBookingIndexes(
 		"uq_bookings_showtime_seat_confirmed",
 	); err != nil {
 		var commandError mongo.CommandError
-		if !errors.As(err, &commandError) || commandError.Code != 27 {
+		if !errors.As(err, &commandError) ||
+			(commandError.Code != 26 && commandError.Code != 27) {
 			return fmt.Errorf("drop legacy confirmed booking index: %w", err)
 		}
 	}
