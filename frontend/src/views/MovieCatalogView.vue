@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Clock, Film, LoaderCircle, Search } from '@lucide/vue'
 
 import { ApiError } from '@/services/api'
@@ -12,19 +12,25 @@ const search = ref('')
 const loading = ref(true)
 const errorMessage = ref('')
 const failedPosters = ref(new Set<string>())
+let searchTimer: ReturnType<typeof setTimeout> | undefined
+let searchController: AbortController | undefined
 
 async function loadMovies() {
+  searchController?.abort()
+  const controller = new AbortController()
+  searchController = controller
   loading.value = true
   errorMessage.value = ''
 
   try {
-    const response = await listMovies(search.value)
+    const response = await listMovies(search.value, controller.signal)
     movies.value = response.data
   } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return
     errorMessage.value =
       error instanceof ApiError ? error.message : 'ไม่สามารถโหลดรายการภาพยนตร์ได้'
   } finally {
-    loading.value = false
+    if (searchController === controller) loading.value = false
   }
 }
 
@@ -33,6 +39,14 @@ function markPosterFailed(movieID: string) {
 }
 
 onMounted(loadMovies)
+watch(search, () => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => void loadMovies(), 300)
+})
+onBeforeUnmount(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchController?.abort()
+})
 </script>
 
 <template>
@@ -48,7 +62,7 @@ onMounted(loadMovies)
 
       <form class="movie-search" role="search" @submit.prevent="loadMovies">
         <Search :size="19" aria-hidden="true" />
-        <input v-model="search" type="search" placeholder="ค้นหาชื่อภาพยนตร์" aria-label="ค้นหาภาพยนตร์" />
+        <input v-model="search" type="search" placeholder="พิมพ์ชื่อภาพยนตร์" aria-label="ค้นหาภาพยนตร์อัตโนมัติ" autocomplete="off" />
         <button type="submit">ค้นหา</button>
       </form>
     </section>
